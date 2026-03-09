@@ -3,7 +3,9 @@ require("dotenv").config();
 const cors = require("cors");
 const app = express();
 const jwt = require("jsonwebtoken");
-app.use(cors());
+app.use(cors({
+  origin: "http://pagination-frontend-bucket.s3-website.ap-south-1.amazonaws.com"
+}));
 const { User } = require("./models");
 const {authenticate} = require("./auth");
 console.log("authenticate type:", typeof authenticate);
