@@ -30,7 +30,6 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  // Handle event
   if (event.type === "checkout.session.completed") {
     const session = event.data.object;
 
