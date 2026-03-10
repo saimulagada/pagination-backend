@@ -17,6 +17,7 @@ const bcrypt = require("bcrypt");
 const Stripe = require("stripe");
 const ACCESS_SECRET = process.env.ACCESS_SECRET;
 const REFRESH_SECRET = process.env.REFRESH_SECRET;
+console.log("Stripe key:", process.env.STRIPE_SECRET_KEY);
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const endpointSecret =
@@ -114,14 +115,20 @@ app.get("/pagination", async (req, res) => {
 });
 
 app.post("/login", async (req, res) => {
+  console.log("Login body:", req.body);
+
   const { email, password } = req.body;
 
   try {
     const user = await User.findOne({ where: { email } });
 
+    console.log("User from DB:", user);
+
     if (!user) return res.status(400).json({ message: "Invalid credentials" });
 
     const isMatch = await bcrypt.compare(password, user.password);
+
+    console.log("Password match:", isMatch);
 
     if (!isMatch)
       return res.status(400).json({ message: "Invalid credentials" });
@@ -129,16 +136,19 @@ app.post("/login", async (req, res) => {
     const accessToken = jwt.sign(
       { id: user.id, role: user.role },
       process.env.ACCESS_SECRET,
-      { expiresIn: "15m" },
+      { expiresIn: "15m" }
     );
 
-    const refreshToken = jwt.sign({ id: user.id }, REFRESH_SECRET, {
-      expiresIn: "7d",
-    });
+    const refreshToken = jwt.sign(
+      { id: user.id },
+      process.env.REFRESH_SECRET,
+      { expiresIn: "7d" }
+    );
 
     res.json({ accessToken, refreshToken });
   } catch (err) {
-    res.status(500).json({ message: "Error" });
+    console.error("LOGIN ERROR:", err);
+    res.status(500).json({ message: err.message });
   }
 });
 
