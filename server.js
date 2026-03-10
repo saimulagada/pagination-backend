@@ -3,45 +3,53 @@ require("dotenv").config();
 const cors = require("cors");
 const app = express();
 const jwt = require("jsonwebtoken");
-app.use(cors({
-  origin: "http://pagination-frontend-bucket.s3-website.ap-south-1.amazonaws.com"
-}));
+app.use(
+  cors({
+    origin:
+      "http://pagination-frontend-bucket.s3-website.ap-south-1.amazonaws.com",
+  }),
+);
 const { User } = require("./models");
-const {authenticate} = require("./auth");
+const { RefreshToken } = require("./models");
+const { authenticate } = require("./auth");
 console.log("authenticate type:", typeof authenticate);
 const bcrypt = require("bcrypt");
 const Stripe = require("stripe");
 const ACCESS_SECRET = process.env.ACCESS_SECRET;
 const REFRESH_SECRET = process.env.REFRESH_SECRET;
 
-const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const endpointSecret =
   "whsec_2fc2aba001c5960a7de8d5f7bae53bae4dbaa7552c5492b49df2caa8ed94aa7f";
 
-app.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
-  const sig = req.headers["stripe-signature"];
+app.post(
+  "/webhook",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    const sig = req.headers["stripe-signature"];
 
-  let event;
+    let event;
 
-  try {
-    event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
-  } catch (err) {
-    console.log("Webhook signature verification failed.", err.message);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
+    try {
+      event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+    } catch (err) {
+      console.log("Webhook signature verification failed.", err.message);
+      return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
 
-  if (event.type === "checkout.session.completed") {
-    const session = event.data.object;
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object;
 
-    const userId = session.metadata.userId;
+      const userId = session.metadata.userId;
 
-    await User.update({ role: "premium" }, { where: { id: userId } });
+      await User.update({ role: "premium" }, { where: { id: userId } });
 
-    console.log("User upgraded to premium!");
-  }
+      console.log("User upgraded to premium!");
+    }
 
-  res.json({ received: true });
-});
+    res.json({ received: true });
+  },
+);
 
 app.use(express.json());
 
@@ -79,7 +87,6 @@ app.post("/register", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-
 
 app.get("/pagination", async (req, res) => {
   try {
@@ -119,11 +126,11 @@ app.post("/login", async (req, res) => {
     if (!isMatch)
       return res.status(400).json({ message: "Invalid credentials" });
 
-   const accessToken = jwt.sign(
-  { id: user.id, role: user.role },
-  process.env.ACCESS_SECRET,
-  { expiresIn: "15m" }
-);
+    const accessToken = jwt.sign(
+      { id: user.id, role: user.role },
+      process.env.ACCESS_SECRET,
+      { expiresIn: "15m" },
+    );
 
     const refreshToken = jwt.sign({ id: user.id }, REFRESH_SECRET, {
       expiresIn: "7d",
@@ -138,8 +145,7 @@ app.post("/login", async (req, res) => {
 app.post("/refresh", async (req, res) => {
   const { refreshToken } = req.body;
 
-  if (!refreshToken)
-    return res.status(401).json({ message: "No token" });
+  if (!refreshToken) return res.status(401).json({ message: "No token" });
 
   try {
     const decoded = jwt.verify(refreshToken, REFRESH_SECRET);
@@ -149,11 +155,10 @@ app.post("/refresh", async (req, res) => {
     const accessToken = jwt.sign(
       { id: user.id, role: user.role },
       ACCESS_SECRET,
-      { expiresIn: "15m" }
+      { expiresIn: "15m" },
     );
 
     res.json({ accessToken });
-
   } catch (err) {
     res.status(403).json({ message: "Invalid refresh token" });
   }
@@ -167,7 +172,7 @@ app.post("/logout", async (req, res) => {
   res.json({ message: "Logged out" });
 });
 
-app.post("/create-checkout-session", authenticate,async (req, res) => {
+app.post("/create-checkout-session", authenticate, async (req, res) => {
   try {
     const { product } = req.body;
 
@@ -191,8 +196,11 @@ app.post("/create-checkout-session", authenticate,async (req, res) => {
         userId: req.user.id, // 🔥 IMPORTANT
       },
 
-      success_url: "http://localhost:5173/success",
-      cancel_url: "http://localhost:5173/cancel",
+      success_url:
+        "http://pagination-frontend-bucket.s3-website.ap-south-1.amazonaws.com/success",
+
+      cancel_url:
+        "http://pagination-frontend-bucket.s3-website.ap-south-1.amazonaws.com/cancel",
     });
 
     res.json({ id: session.id });
@@ -201,8 +209,6 @@ app.post("/create-checkout-session", authenticate,async (req, res) => {
     res.status(500).json({ error: "Something went wrong" });
   }
 });
-
-
 
 app.listen(3000, "0.0.0.0", () => {
   console.log("Server running on port 3000");
