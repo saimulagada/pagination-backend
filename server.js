@@ -1,66 +1,73 @@
 const express = require("express");
 require("dotenv").config();
 const cors = require("cors");
-const app = express();
 const jwt = require("jsonwebtoken");
+const bcrypt = require("bcrypt");
+const Stripe = require("stripe");
+
+const { User, RefreshToken } = require("./models");
+const { authenticate } = require("./auth");
+
+const app = express();
+
+/* ---------------- CORS ---------------- */
+
 app.use(
   cors({
     origin: [
       "http://pagination-frontend-bucket.s3-website.ap-south-1.amazonaws.com",
       "http://localhost:5173",
     ],
-  }),
+  })
 );
-const { User } = require("./models");
-const { RefreshToken } = require("./models");
-const { authenticate } = require("./auth");
-console.log("authenticate type:", typeof authenticate);
-const bcrypt = require("bcrypt");
-const Stripe = require("stripe");
-const ACCESS_SECRET = process.env.ACCESS_SECRET;
-const REFRESH_SECRET = process.env.REFRESH_SECRET;
-console.log("Stripe key:", process.env.STRIPE_SECRET_KEY);
+
+/* ---------------- STRIPE ---------------- */
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
 const endpointSecret =
   "whsec_2fc2aba001c5960a7de8d5f7bae53bae4dbaa7552c5492b49df2caa8ed94aa7f";
 
-app.post(
-  "/webhook",
-  express.raw({ type: "application/json" }),
-  async (req, res) => {
-    const sig = req.headers["stripe-signature"];
+/* ---------------- WEBHOOK ---------------- */
 
-    let event;
+app.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
+  const sig = req.headers["stripe-signature"];
 
-    try {
-      event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
-    } catch (err) {
-      console.log("Webhook signature verification failed.", err.message);
-      return res.status(400).send(`Webhook Error: ${err.message}`);
-    }
+  let event;
 
-    if (event.type === "checkout.session.completed") {
-      const session = event.data.object;
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+  } catch (err) {
+    console.log("Webhook verification failed:", err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
 
-      const userId = session.metadata.userId;
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object;
+    const userId = session.metadata.userId;
 
-      await User.update({ role: "premium" }, { where: { id: userId } });
+    await User.update({ role: "premium" }, { where: { id: userId } });
 
-      console.log("User upgraded to premium!");
-    }
+    console.log("User upgraded to premium!");
+  }
 
-    res.json({ received: true });
-  },
-);
+  res.json({ received: true });
+});
+
+/* ---------------- JSON PARSER ---------------- */
 
 app.use(express.json());
 
+/* ---------------- TEST ROUTE ---------------- */
+
 app.get("/welcome", (req, res) => {
-  res.status(200).json({
-    message: "Hello World. welcome to coding",
+  res.json({
+    message: "Hello World. Welcome to coding",
   });
 });
+
+/* ---------------- GET USERS ---------------- */
+
 app.get("/users", async (req, res) => {
   try {
     const users = await User.findAll();
@@ -70,10 +77,10 @@ app.get("/users", async (req, res) => {
   }
 });
 
+/* ---------------- REGISTER ---------------- */
+
 app.post("/register", async (req, res) => {
   try {
-    console.log("Request body:", req.body);
-
     const { name, email, password } = req.body;
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -86,10 +93,12 @@ app.post("/register", async (req, res) => {
 
     res.status(201).json({ message: "User registered", user });
   } catch (error) {
-    console.error("FULL ERROR:", error); // 👈 VERY IMPORTANT
+    console.error("REGISTER ERROR:", error);
     res.status(500).json({ error: error.message });
   }
 });
+
+/* ---------------- PAGINATION ---------------- */
 
 app.get("/pagination", async (req, res) => {
   try {
@@ -100,7 +109,7 @@ app.get("/pagination", async (req, res) => {
     const { count, rows } = await User.findAndCountAll({
       limit,
       offset,
-      order: [["id", "ASC"]], // good practice
+      order: [["id", "ASC"]],
     });
 
     const totalPages = Math.ceil(count / limit);
@@ -116,21 +125,18 @@ app.get("/pagination", async (req, res) => {
   }
 });
 
+/* ---------------- LOGIN ---------------- */
+
 app.post("/login", async (req, res) => {
-  console.log("Login body:", req.body);
-
-  const { email, password } = req.body;
-
   try {
+    const { email, password } = req.body;
+
     const user = await User.findOne({ where: { email } });
 
-    console.log("User from DB:", user);
-
-    if (!user) return res.status(400).json({ message: "Invalid credentials" });
+    if (!user)
+      return res.status(400).json({ message: "Invalid credentials" });
 
     const isMatch = await bcrypt.compare(password, user.password);
-
-    console.log("Password match:", isMatch);
 
     if (!isMatch)
       return res.status(400).json({ message: "Invalid credentials" });
@@ -138,41 +144,50 @@ app.post("/login", async (req, res) => {
     const accessToken = jwt.sign(
       { id: user.id, role: user.role },
       process.env.ACCESS_SECRET,
-      { expiresIn: "15m" },
+      { expiresIn: "15m" }
     );
 
-    const refreshToken = jwt.sign({ id: user.id }, process.env.REFRESH_SECRET, {
-      expiresIn: "7d",
-    });
+    const refreshToken = jwt.sign(
+      { id: user.id },
+      process.env.REFRESH_SECRET,
+      { expiresIn: "7d" }
+    );
 
     res.json({ accessToken, refreshToken });
+
   } catch (err) {
     console.error("LOGIN ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 });
 
+/* ---------------- REFRESH TOKEN ---------------- */
+
 app.post("/refresh", async (req, res) => {
   const { refreshToken } = req.body;
 
-  if (!refreshToken) return res.status(401).json({ message: "No token" });
+  if (!refreshToken)
+    return res.status(401).json({ message: "No token" });
 
   try {
-    const decoded = jwt.verify(refreshToken, REFRESH_SECRET);
+    const decoded = jwt.verify(refreshToken, process.env.REFRESH_SECRET);
 
     const user = await User.findByPk(decoded.id);
 
     const accessToken = jwt.sign(
       { id: user.id, role: user.role },
-      ACCESS_SECRET,
-      { expiresIn: "15m" },
+      process.env.ACCESS_SECRET,
+      { expiresIn: "15m" }
     );
 
     res.json({ accessToken });
+
   } catch (err) {
     res.status(403).json({ message: "Invalid refresh token" });
   }
 });
+
+/* ---------------- LOGOUT ---------------- */
 
 app.post("/logout", async (req, res) => {
   const { refreshToken } = req.body;
@@ -182,12 +197,15 @@ app.post("/logout", async (req, res) => {
   res.json({ message: "Logged out" });
 });
 
+/* ---------------- STRIPE CHECKOUT ---------------- */
+
 app.post("/create-checkout-session", authenticate, async (req, res) => {
   try {
     const { product } = req.body;
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
+
       line_items: [
         {
           price_data: {
@@ -200,10 +218,11 @@ app.post("/create-checkout-session", authenticate, async (req, res) => {
           quantity: 1,
         },
       ],
+
       mode: "payment",
 
       metadata: {
-        userId: req.user.id, // 🔥 IMPORTANT
+        userId: req.user.id,
       },
 
       success_url:
@@ -214,11 +233,14 @@ app.post("/create-checkout-session", authenticate, async (req, res) => {
     });
 
     res.json({ id: session.id });
+
   } catch (error) {
     console.log(error);
     res.status(500).json({ error: "Something went wrong" });
   }
 });
+
+/* ---------------- SERVER ---------------- */
 
 app.listen(3000, "0.0.0.0", () => {
   console.log("Server running on port 3000");
