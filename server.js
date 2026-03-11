@@ -5,8 +5,10 @@ const app = express();
 const jwt = require("jsonwebtoken");
 app.use(
   cors({
-    origin:
+    origin: [
       "http://pagination-frontend-bucket.s3-website.ap-south-1.amazonaws.com",
+      "http://localhost:5173",
+    ],
   }),
 );
 const { User } = require("./models");
@@ -136,14 +138,12 @@ app.post("/login", async (req, res) => {
     const accessToken = jwt.sign(
       { id: user.id, role: user.role },
       process.env.ACCESS_SECRET,
-      { expiresIn: "15m" }
+      { expiresIn: "15m" },
     );
 
-    const refreshToken = jwt.sign(
-      { id: user.id },
-      process.env.REFRESH_SECRET,
-      { expiresIn: "7d" }
-    );
+    const refreshToken = jwt.sign({ id: user.id }, process.env.REFRESH_SECRET, {
+      expiresIn: "7d",
+    });
 
     res.json({ accessToken, refreshToken });
   } catch (err) {
