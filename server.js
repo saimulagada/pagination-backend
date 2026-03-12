@@ -25,8 +25,7 @@ app.use(
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
-const endpointSecret =
-  "whsec_2fc2aba001c5960a7de8d5f7bae53bae4dbaa7552c5492b49df2caa8ed94aa7f";
+const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
 /* ---------------- WEBHOOK ---------------- */
 
